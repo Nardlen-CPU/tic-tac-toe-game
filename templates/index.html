@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tic Tac Toe</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700&family=Montserrat:wght@500;700&family=Orbitron:wght@600;700&family=Rajdhani:wght@600;700&display=swap');
+
+        /* Light Mode (Premium Minimalist) */
+        :root {
+            --bg-color: #F8FAFC;
+            --grid-color: #CBD5E1;
+            --player-x: #0EA5E9;
+            --player-o: #E11D48;
+            --text-color: #0B0F19;
+            --glow-x: none;
+            --glow-o: none;
+        }
+
+        /* Dark Mode (Default Neon) */
+        [data-theme="dark"] {
+            --bg-color: #0B0F19;
+            --grid-color: #334155;
+            --player-x: #06B6D4;
+            --player-o: #F43F5E;
+            --text-color: #F8FAFC;
+            --glow-x: 0 0 10px #06B6D4, 0 0 20px #06B6D4;
+            --glow-o: 0 0 10px #F43F5E, 0 0 20px #F43F5E;
+        }
+
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            transition: all 0.3s ease;
+        }
+
+        h1 { font-family: 'Exo 2', sans-serif; font-size: 3.5rem; margin-bottom: 10px; }
+        .status { font-family: 'Orbitron', sans-serif; font-size: 1.5rem; margin-bottom: 30px; height: 30px; }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 130px);
+            grid-template-rows: repeat(3, 130px);
+            gap: 8px;
+            background-color: var(--grid-color);
+            padding: 8px;
+            border-radius: 12px;
+        }
+
+        .cell {
+            background-color: var(--bg-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 5.5rem;
+            font-weight: 700;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+
+        .cell:hover { filter: brightness(1.3); }
+        .cell.X { color: var(--player-x); text-shadow: var(--glow-x); }
+        .cell.O { color: var(--player-o); text-shadow: var(--glow-o); }
+
+        .controls { margin-top: 40px; display: flex; gap: 15px; }
+
+        button, select {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.2rem;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            background-color: var(--grid-color);
+            color: var(--text-color);
+            cursor: pointer;
+            font-weight: 700;
+            transition: 0.2s;
+        }
+
+        button:hover, select:hover { filter: brightness(1.3); }
+    </style>
+</head>
+<body>
+    <h1>TIC TAC TOE</h1>
+    <div class="status" id="status">Player Turn (X)</div>
+
+    <div class="board" id="board"></div>
+
+    <div class="controls">
+        <select id="difficulty">
+            <option value="Easy">Easy</option>
+            <option value="Intermediate" selected>Intermediate</option>
+            <option value="Hard">Hard</option>
+        </select>
+        <button onclick="toggleTheme()">Toggle Theme</button>
+        <button onclick="resetGame()">Reset Game</button>
+    </div>
+
+    <script>
+        let boardState = [
+            [' ', ' ', ' '],
+            [' ', ' ', ' '],
+            [' ', ' ', ' ']
+        ];
+        let gameActive = true;
+
+        const boardElement = document.getElementById('board');
+        const statusElement = document.getElementById('status');
+
+        function toggleTheme() {
+            const html = document.documentElement;
+            html.setAttribute('data-theme', html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+        }
+
+        function createBoard() {
+            boardElement.innerHTML = '';
+            for (let r = 0; r < 3; r++) {
+                for (let c = 0; c < 3; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+                    cell.onclick = () => makeMove(r, c);
+                    boardElement.appendChild(cell);
+                }
+            }
+        }
+
+        function updateBoardUI() {
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                const r = cell.dataset.row;
+                const c = cell.dataset.col;
+                const value = boardState[r][c];
+                cell.textContent = value;
+                cell.className = 'cell ' + (value !== ' ' ? value : '');
+            });
+        }
+
+        async function makeMove(row, col) {
+            if (!gameActive || boardState[row][col] !== ' ') return;
+
+            boardState[row][col] = 'X';
+            updateBoardUI();
+            statusElement.textContent = "Machine is thinking...";
+            gameActive = false;
+
+            const difficulty = document.getElementById('difficulty').value;
+            const response = await fetch('/play', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ board: boardState, difficulty: difficulty })
+            });
+
+            const data = await response.json();
+            boardState = data.board;
+            updateBoardUI();
+
+            if (data.status === 'win') {
+                statusElement.textContent = `${data.winner} Wins!`;
+            } else if (data.status === 'draw') {
+                statusElement.textContent = "It's a Draw!";
+            } else {
+                statusElement.textContent = "Player Turn (X)";
+                gameActive = true;
+            }
+        }
+
+        function resetGame() {
+            boardState = [
+                [' ', ' ', ' '],
+                [' ', ' ', ' '],
+                [' ', ' ', ' ']
+            ];
+            gameActive = true;
+            statusElement.textContent = "Player Turn (X)";
+            updateBoardUI();
+        }
+
+        createBoard();
+    </script>
+</body>
+</html>

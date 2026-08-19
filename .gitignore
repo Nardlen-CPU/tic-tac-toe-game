@@ -1,0 +1,4 @@
+venv/
+__pycache__/
+*.pyc
+tic_tac_toe_history.json
