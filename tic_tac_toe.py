@@ -95,6 +95,26 @@ def check_win(board, player):
     return any(all(cell == player for cell in line) for line in get_lines(board))
 
 
+def get_winning_line(board, player):
+    """Return a list of coordinates [(r,c),...] forming the winning line for player, or None."""
+    size = len(board)
+    # rows
+    for r in range(size):
+        if all(board[r][c] == player for c in range(size)):
+            return [(r, c) for c in range(size)]
+    # columns
+    for c in range(size):
+        if all(board[r][c] == player for r in range(size)):
+            return [(r, c) for r in range(size)]
+    # main diagonal
+    if all(board[i][i] == player for i in range(size)):
+        return [(i, i) for i in range(size)]
+    # anti-diagonal
+    if all(board[i][size - 1 - i] == player for i in range(size)):
+        return [(i, size - 1 - i) for i in range(size)]
+    return None
+
+
 def check_draw(board):
     return all(cell != EMPTY for row in board for cell in row)
 
@@ -216,7 +236,9 @@ def find_winning_move(board, player):
     return None
 
 
-def choose_center_or_random_move(board):
+def choose_center_or_random_move(board, rng=None):
+    if rng is None:
+        rng = random
     moves = get_available_moves(board)
     if not moves:
         return None
@@ -238,8 +260,8 @@ def choose_center_or_random_move(board):
 
     open_centers = [move for move in centers if move in moves]
     if open_centers:
-        return random.choice(open_centers)
-    return random.choice(moves)
+        return rng.choice(open_centers)
+    return rng.choice(moves)
 
 
 def get_tactical_move(board, machine_player, human_player):
@@ -254,12 +276,12 @@ def get_tactical_move(board, machine_player, human_player):
     return None
 
 
-def get_intermediate_move(board, machine_player, human_player):
+def get_intermediate_move(board, machine_player, human_player, rng=None):
     tactical_move = get_tactical_move(board, machine_player, human_player)
     if tactical_move:
         return tactical_move
 
-    return choose_center_or_random_move(board)
+    return choose_center_or_random_move(board, rng=rng)
 
 
 def board_key(board):
@@ -301,9 +323,13 @@ def minimax(board, machine_player, human_player, is_maximizing, depth=0, cache=N
     return best_score
 
 
-def get_minimax_move(board, machine_player, human_player):
+def get_minimax_move(board, machine_player, human_player, rng=None):
+    if rng is None:
+        rng = random
     if len(get_available_moves(board)) == 9:
-        return 1, 1
+        # choose center for 3x3 board
+        size = len(board)
+        return size // 2, size // 2
 
     best_score = -sys.maxsize
     best_moves = []
@@ -322,7 +348,7 @@ def get_minimax_move(board, machine_player, human_player):
 
     if not best_moves:
         return None
-    return random.choice(best_moves)
+    return rng.choice(best_moves)
 
 
 def evaluate_line(line, machine_player, human_player):
@@ -360,7 +386,9 @@ def evaluate_board(board, machine_player, human_player):
     return score
 
 
-def get_strategic_move(board, machine_player, human_player):
+def get_strategic_move(board, machine_player, human_player, rng=None):
+    if rng is None:
+        rng = random
     tactical_move = get_tactical_move(board, machine_player, human_player)
     if tactical_move:
         return tactical_move
@@ -392,21 +420,23 @@ def get_strategic_move(board, machine_player, human_player):
 
     if not best_moves:
         return None
-    return random.choice(best_moves)
+    return rng.choice(best_moves)
 
 
-def get_machine_move(board, machine_player, human_player, difficulty):
+def get_machine_move(board, machine_player, human_player, difficulty, rng=None):
+    if rng is None:
+        rng = random
     moves = get_available_moves(board)
     if not moves:
         return None
 
     if difficulty == 'Easy':
-        return random.choice(moves)
+        return rng.choice(moves)
     if difficulty == 'Intermediate':
-        return get_intermediate_move(board, machine_player, human_player)
+        return get_intermediate_move(board, machine_player, human_player, rng=rng)
     if len(board) == 3:
-        return get_minimax_move(board, machine_player, human_player)
-    return get_strategic_move(board, machine_player, human_player)
+        return get_minimax_move(board, machine_player, human_player, rng=rng)
+    return get_strategic_move(board, machine_player, human_player, rng=rng)
 
 
 def get_result_label(settings, current_player):

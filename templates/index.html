@@ -42,13 +42,18 @@
             transition: all 0.3s ease;
         }
 
-        h1 { font-family: 'Exo 2', sans-serif; font-size: 3.5rem; margin-bottom: 10px; }
-        .status { font-family: 'Orbitron', sans-serif; font-size: 1.5rem; margin-bottom: 30px; height: 30px; }
+        h1 { font-family: 'Exo 2', sans-serif; font-size: 3.2rem; margin-bottom: 6px; }
+        .status { font-family: 'Orbitron', sans-serif; font-size: 1.2rem; margin-bottom: 16px; min-height: 24px; }
 
+        .top-row { display:flex; gap:20px; align-items:center; margin-bottom:12px; }
+        .scoreboard { display:flex; gap:12px; align-items:center; font-weight:700; }
+        .score { background:var(--grid-color); padding:8px 12px; border-radius:8px; }
+
+        .board-wrap { display:flex; flex-direction:column; align-items:center; gap:12px; }
         .board {
             display: grid;
-            grid-template-columns: repeat(3, 130px);
-            grid-template-rows: repeat(3, 130px);
+            grid-template-columns: repeat(3, min(20vw,130px));
+            grid-template-rows: repeat(3, min(20vw,130px));
             gap: 8px;
             background-color: var(--grid-color);
             padding: 8px;
@@ -60,133 +65,309 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 5.5rem;
+            font-size: min(9vw,5.5rem);
             font-weight: 700;
             cursor: pointer;
             user-select: none;
-            transition: background-color 0.2s;
+            transition: transform 0.12s ease, background-color 0.15s;
+            border-radius:6px;
         }
 
-        .cell:hover { filter: brightness(1.3); }
+        .cell:active { transform: scale(0.98); }
+        .cell.empty:hover { filter: brightness(1.08); }
         .cell.X { color: var(--player-x); text-shadow: var(--glow-x); }
         .cell.O { color: var(--player-o); text-shadow: var(--glow-o); }
+        .cell.winning { box-shadow: 0 0 18px rgba(255,255,255,0.06) inset; border: 2px solid rgba(255,255,255,0.06); }
+        .cell.anim { transform: scale(1.06); box-shadow: 0 8px 22px rgba(0,0,0,0.18); transition: transform 0.25s ease, box-shadow 0.25s; }
 
-        .controls { margin-top: 40px; display: flex; gap: 15px; }
+        .controls { margin-top: 8px; display: flex; gap: 8px; flex-wrap:wrap; justify-content:center; }
 
-        button, select {
+        button, select, label {
             font-family: 'Rajdhani', sans-serif;
-            font-size: 1.2rem;
-            padding: 12px 24px;
+            font-size: 1rem;
+            padding: 8px 14px;
             border: none;
             border-radius: 6px;
             background-color: var(--grid-color);
             color: var(--text-color);
             cursor: pointer;
             font-weight: 700;
-            transition: 0.2s;
+            transition: 0.15s;
         }
 
-        button:hover, select:hover { filter: brightness(1.3); }
+        .small { padding:6px 10px; font-size:0.95rem }
+        .muted { opacity:0.85; font-weight:600 }
+
+        @media (max-width:520px){ body{padding:12px;} h1{font-size:2.2rem} }
     </style>
 </head>
 <body>
     <h1>TIC TAC TOE</h1>
+
+    <div class="top-row">
+        <div class="scoreboard" aria-live="polite">
+            <div class="score">X: <span id="scoreX">0</span></div>
+            <div class="score">O: <span id="scoreO">0</span></div>
+            <div class="score">Draws: <span id="scoreD">0</span></div>
+        </div>
+        <div style="margin-left:12px;" class="muted">Mode:
+            <select id="mode">
+                <option value="computer" selected>Vs Computer</option>
+                <option value="local">Two-Player (Local)</option>
+            </select>
+        </div>
+        <div style="margin-left:12px;" class="muted">You are:
+            <select id="playerSymbol">
+                <option value="X" selected>X</option>
+                <option value="O">O</option>
+            </select>
+        </div>
+    <div style="margin-left:12px;" class="muted">Board:
+        <select id="boardSize">
+            <option value="3" selected>3 x 3</option>
+            <option value="4">4 x 4</option>
+            <option value="5">5 x 5</option>
+        </select>
+    </div>
+    </div>
+
     <div class="status" id="status">Player Turn (X)</div>
 
-    <div class="board" id="board"></div>
+    <div class="board-wrap">
+        <div class="board" id="board" role="grid" aria-label="Tic Tac Toe board"></div>
 
-    <div class="controls">
-        <select id="difficulty">
-            <option value="Easy">Easy</option>
-            <option value="Intermediate" selected>Intermediate</option>
-            <option value="Hard">Hard</option>
-        </select>
-        <button onclick="toggleTheme()">Toggle Theme</button>
-        <button onclick="resetGame()">Reset Game</button>
+        <div class="controls">
+            <select id="difficulty" class="small">
+                <option value="Easy">Easy</option>
+                <option value="Intermediate" selected>Intermediate</option>
+                <option value="Hard">Hard</option>
+            </select>
+            <label class="small" style="display:flex;align-items:center;gap:6px">Deterministic <input id="deterministicToggle" type="checkbox"></label>
+            <input id="seedInput" class="small" style="width:80px" placeholder="seed" />
+            <button id="startBtn" class="small">Start Game</button>
+            <button id="undoBtn" class="small">Undo</button>
+            <button id="resetBtn" class="small">Reset</button>
+            <button id="toggleTheme" class="small">Toggle Theme</button>
+            <label class="small" style="display:flex;align-items:center;gap:6px">Sound <input id="soundToggle" type="checkbox" checked></label>
+        </div>
     </div>
 
     <script>
-        let boardState = [
-            [' ', ' ', ' '],
-            [' ', ' ', ' '],
-            [' ', ' ', ' ']
-        ];
-        let gameActive = true;
+        // Persistent settings & scores
+        const storage = window.localStorage;
+        const scoreXEl = document.getElementById('scoreX');
+        const scoreOEl = document.getElementById('scoreO');
+        const scoreDEl = document.getElementById('scoreD');
 
+        let scoreX = parseInt(storage.getItem('scoreX')||'0',10);
+        let scoreO = parseInt(storage.getItem('scoreO')||'0',10);
+        let scoreD = parseInt(storage.getItem('scoreD')||'0',10);
+        function saveScores(){ storage.setItem('scoreX',scoreX); storage.setItem('scoreO',scoreO); storage.setItem('scoreD',scoreD); updateScoreUI(); }
+        function updateScoreUI(){ scoreXEl.textContent = scoreX; scoreOEl.textContent = scoreO; scoreDEl.textContent = scoreD; }
+        updateScoreUI();
+
+        // Game state
+        let boardState = [];
+        let boardSize = parseInt(document.getElementById('boardSize').value, 10) || 3;
+        let gameActive = false;
+        let currentPlayer = 'X'; // track whose turn it is for local mode and display
+        let moveHistory = []; // snapshots for undo (store deep copies)
+
+        // Settings
         const boardElement = document.getElementById('board');
         const statusElement = document.getElementById('status');
+        const difficultyEl = document.getElementById('difficulty');
+        const modeEl = document.getElementById('mode');
+        const playerSymbolEl = document.getElementById('playerSymbol');
+        const boardSizeEl = document.getElementById('boardSize');
+        const deterministicToggle = document.getElementById('deterministicToggle');
+        const seedInput = document.getElementById('seedInput');
+        const startBtn = document.getElementById('startBtn');
+        const undoBtn = document.getElementById('undoBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const toggleThemeBtn = document.getElementById('toggleTheme');
+        const soundToggle = document.getElementById('soundToggle');
 
-        function toggleTheme() {
-            const html = document.documentElement;
-            html.setAttribute('data-theme', html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
-        }
+        // Sound helper (simple beep using WebAudio)
+        const audioCtx = window.AudioContext ? new AudioContext() : null;
+        function beep(freq=440, duration=0.08, vol=0.05){ if(!audioCtx || !soundToggle.checked) return; const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.type='sine'; o.frequency.value=freq; g.gain.value=vol; o.connect(g); g.connect(audioCtx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration); o.stop(audioCtx.currentTime + duration + 0.02); }
 
-        function createBoard() {
-            boardElement.innerHTML = '';
-            for (let r = 0; r < 3; r++) {
-                for (let c = 0; c < 3; c++) {
-                    const cell = document.createElement('div');
-                    cell.classList.add('cell');
-                    cell.dataset.row = r;
-                    cell.dataset.col = c;
-                    cell.onclick = () => makeMove(r, c);
-                    boardElement.appendChild(cell);
-                }
+        // Theme persistence
+        const htmlEl = document.documentElement;
+        const savedTheme = storage.getItem('theme'); if(savedTheme) htmlEl.setAttribute('data-theme', savedTheme);
+        function toggleTheme(){ const next = htmlEl.getAttribute('data-theme')==='dark'?'light':'dark'; htmlEl.setAttribute('data-theme', next); storage.setItem('theme', next); }
+        toggleThemeBtn.onclick = toggleTheme;
+
+        // Utilities
+        function cloneBoard(b){ return b.map(r=>r.slice()); }
+        function boardToString(b){ return b.flat().join(''); }
+
+        // Create board cells for current boardSize
+        function createBoard(){ boardElement.innerHTML=''; boardElement.style.gridTemplateColumns = `repeat(${boardSize}, min(20vw,130px))`; boardElement.style.gridTemplateRows = `repeat(${boardSize}, min(20vw,130px))`; for(let r=0;r<boardSize;r++){ for(let c=0;c<boardSize;c++){ const cell = document.createElement('div'); cell.classList.add('cell','empty'); cell.dataset.row=r; cell.dataset.col=c; cell.tabIndex=0; cell.setAttribute('role','gridcell'); cell.setAttribute('aria-label',`row ${r+1} col ${c+1}`); cell.onclick = ()=>handleClick(r,c); cell.onkeydown = (e)=>{ if(e.key==='Enter' || e.key===' ') handleClick(r,c); }; boardElement.appendChild(cell); } } }
+
+        function updateBoardUI(){ const cells = document.querySelectorAll('.cell'); cells.forEach(cell=>{ const r = +cell.dataset.row; const c = +cell.dataset.col; const value = (boardState[r] && boardState[r][c]) ? boardState[r][c] : ' '; cell.textContent = value===' ' ? '' : value; cell.className = 'cell ' + (value===' ' ? 'empty' : value); }); }
+
+        // Determine winning line for any board size (returns array of [r,c] or null)
+        function getWinningLine(b, p){
+            const size = b.length;
+            // rows
+            for(let r=0;r<size;r++){
+                let ok = true; for(let c=0;c<size;c++) if(b[r][c]!==p){ ok=false; break; }
+                if(ok) return Array.from({length:size}, (_,i)=>[r,i]);
             }
+            // columns
+            for(let c=0;c<size;c++){
+                let ok = true; for(let r=0;r<size;r++) if(b[r][c]!==p){ ok=false; break; }
+                if(ok) return Array.from({length:size}, (_,i)=>[i,c]);
+            }
+            // main diagonal
+            let ok = true; for(let i=0;i<size;i++) if(b[i][i]!==p){ ok=false; break; }
+            if(ok) return Array.from({length:size}, (_,i)=>[i,i]);
+            // anti-diagonal
+            ok = true; for(let i=0;i<size;i++) if(b[i][size-1-i]!==p){ ok=false; break; }
+            if(ok) return Array.from({length:size}, (_,i)=>[i,size-1-i]);
+            return null;
         }
 
-        function updateBoardUI() {
-            const cells = document.querySelectorAll('.cell');
-            cells.forEach(cell => {
-                const r = cell.dataset.row;
-                const c = cell.dataset.col;
-                const value = boardState[r][c];
-                cell.textContent = value;
-                cell.className = 'cell ' + (value !== ' ' ? value : '');
-            });
-        }
+        function highlightWinningLine(line){ if(!line) return; clearHighlights(); line.forEach(([r,c])=>{ const sel = `.cell[data-row="${r}"][data-col="${c}"]`; const el = document.querySelector(sel); if(el) el.classList.add('winning'); }); }
+        function clearHighlights(){ document.querySelectorAll('.cell.winning').forEach(el=>el.classList.remove('winning')); }
 
-        async function makeMove(row, col) {
-            if (!gameActive || boardState[row][col] !== ' ') return;
+        // Check draw
+        function checkDraw(b){ return b.flat().every(v=>v!==' '); }
 
-            boardState[row][col] = 'X';
-            updateBoardUI();
-            statusElement.textContent = "Machine is thinking...";
-            gameActive = false;
+        // Initialize or restart the board with selected size
+        function initBoard(size){ boardSize = size; boardState = []; for(let r=0;r<size;r++){ boardState.push(Array.from({length:size}, ()=>' ')); } moveHistory = []; gameActive = true; currentPlayer = 'X'; createBoard(); updateBoardUI(); statusElement.textContent = `Player Turn (${playerSymbolEl.value})`; }
 
-            const difficulty = document.getElementById('difficulty').value;
-            const response = await fetch('/play', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ board: boardState, difficulty: difficulty })
-            });
-
-            const data = await response.json();
-            boardState = data.board;
-            updateBoardUI();
-
-            if (data.status === 'win') {
-                statusElement.textContent = `${data.winner} Wins!`;
-            } else if (data.status === 'draw') {
-                statusElement.textContent = "It's a Draw!";
+        // Local two-player move or vs computer
+        async function handleClick(r,c){ const mode = modeEl.value; if(!gameActive) return; if(boardState[r][c]!==' ') return; playAt(r,c, currentPlayer);
+            if(mode==='local'){
+                // switch player
+                if(checkEnd()) return;
+                currentPlayer = currentPlayer==='X'?'O':'X'; statusElement.textContent = `Player Turn (${currentPlayer})`;
             } else {
-                statusElement.textContent = "Player Turn (X)";
-                gameActive = true;
+                // vs computer: if human is not currentPlayer, ignore (we assume human always starts as chosen symbol)
+                const humanSymbol = playerSymbolEl.value;
+                if(currentPlayer !== humanSymbol) return; // shouldn't happen
+                // push history (for undo) before machine move
+                if(checkEnd()) return;
+                // call server for machine move
+                await machineRespond();
             }
         }
 
-        function resetGame() {
-            boardState = [
-                [' ', ' ', ' '],
-                [' ', ' ', ' '],
-                [' ', ' ', ' ']
-            ];
-            gameActive = true;
-            statusElement.textContent = "Player Turn (X)";
-            updateBoardUI();
+        // Place symbol locally and record history
+        function playAt(r,c, symbol){ moveHistory.push(cloneBoard(boardState)); boardState[r][c] = symbol; updateBoardUI(); clearHighlights(); beep(symbol==='X'?440:660); }
+
+        // Check win/draw and update UI/scores
+        function checkEnd(){ // check both players
+            const winX = getWinningLine(boardState,'X');
+            const winO = getWinningLine(boardState,'O');
+            if(winX){ highlightWinningLine(winX); statusElement.textContent = 'X Wins!'; gameActive=false; scoreX++; saveScores(); return true; }
+            if(winO){ highlightWinningLine(winO); statusElement.textContent = 'O Wins!'; gameActive=false; scoreO++; saveScores(); return true; }
+            if(checkDraw(boardState)){ statusElement.textContent = "It's a Draw!"; gameActive=false; scoreD++; saveScores(); return true; }
+            return false;
         }
 
-        createBoard();
+        // Machine move: post to server and update board
+        async function machineRespond(){ gameActive=false; statusElement.textContent='Machine is thinking...'; const difficulty = difficultyEl.value;
+            // send board to server
+            try{
+                const resp = await fetch('/play',{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                                    body: JSON.stringify({ board: boardState, difficulty: difficulty, player_symbol: playerSymbolEl.value, mode: modeEl.value, seed: (deterministic && seedInput.value) ? seedInput.value : null })
+                });
+                const data = await resp.json();
+                moveHistory.push(cloneBoard(boardState)); // push before machine overwrote board
+                boardState = data.board;
+                updateBoardUI();
+                // animate machine move if provided
+                if(data.machine_move){
+                    try{
+                        const [mr, mc] = data.machine_move;
+                        const sel = `.cell[data-row="${mr}"][data-col="${mc}"]`;
+                        const mEl = document.querySelector(sel);
+                        if(mEl){
+                            mEl.classList.add('anim');
+                            setTimeout(()=>{ mEl.classList.remove('anim'); }, 320);
+                        }
+                    }catch(e){ /* swallow animation errors */ }
+                }
+                // use server-provided winning line if available
+                if(data.status==='win'){
+                    const winner = data.winner;
+                    const winLine = data.winning_line || getWinningLine(boardState, winner);
+                    highlightWinningLine(winLine);
+                    statusElement.textContent = `${winner} Wins!`;
+                    gameActive=false;
+                    if(winner==='X'){ scoreX++; } else { scoreO++; } saveScores();
+                    return;
+                }
+                if(data.status==='draw'){
+                    statusElement.textContent = "It's a Draw!"; scoreD++; saveScores(); return;
+                }
+                // continue: player turn
+                currentPlayer = playerSymbolEl.value; statusElement.textContent = `Player Turn (${currentPlayer})`; gameActive=true;
+            }catch(err){ console.error(err); statusElement.textContent='Error: could not reach server'; gameActive=true; }
+        }
+
+        // Undo functionality: reverts last move (for vs computer revert two moves)
+        undoBtn.onclick = ()=>{
+            if(moveHistory.length===0) return; // nothing to undo
+            const mode = modeEl.value;
+            if(mode==='local'){
+                boardState = moveHistory.pop(); updateBoardUI(); gameActive=true; currentPlayer = currentPlayer==='X'?'O':'X'; statusElement.textContent = `Player Turn (${currentPlayer})`; clearHighlights();
+            }else{
+                // vs computer: pop last two states if available
+                boardState = moveHistory.pop(); // revert to state before last player move
+                if(moveHistory.length>0) moveHistory.pop(); // also discard previous machine move snapshot if exists
+                updateBoardUI(); gameActive=true; statusElement.textContent = `Player Turn (${playerSymbolEl.value})`; clearHighlights();
+            }
+        };
+
+        // Reset with confirmation
+        resetBtn.onclick = ()=>{
+            if(!confirm('Reset game? Scores will remain.')) return; initBoard(parseInt(boardSizeEl.value,10) || 3); clearHighlights(); }
+
+        // Mode and symbol change handlers
+        modeEl.onchange = ()=>{ // reset board when switching mode for clarity
+            initBoard(parseInt(boardSizeEl.value,10) || 3); clearHighlights(); }
+        playerSymbolEl.onchange = ()=>{ currentPlayer = playerSymbolEl.value; statusElement.textContent = `Player Turn (${playerSymbolEl.value})`; }
+
+        // Keyboard navigation: arrow keys move a focused cell
+        let focusedR = 0, focusedC = 0;
+        document.addEventListener('keydown', (e)=>{
+            const key = e.key;
+            if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(key)){
+                e.preventDefault(); if(key==='ArrowUp') focusedR = (focusedR + boardSize - 1) % boardSize; if(key==='ArrowDown') focusedR = (focusedR + 1) % boardSize; if(key==='ArrowLeft') focusedC = (focusedC + boardSize - 1) % boardSize; if(key==='ArrowRight') focusedC = (focusedC + 1) % boardSize; const sel = `.cell[data-row="${focusedR}"][data-col="${focusedC}"]`; const el = document.querySelector(sel); if(el) el.focus(); }
+            if(key==='u' || (e.ctrlKey && key==='z')){ // undo
+                e.preventDefault(); undoBtn.click(); }
+            if(key==='r' || (e.ctrlKey && key==='r')){ e.preventDefault(); resetBtn.click(); }
+        });
+
+        // Save theme changes via button is handled above; restore sound pref
+        soundToggle.onchange = ()=>{ storage.setItem('sound', soundToggle.checked ? '1' : '0'); }
+        const soundSaved = storage.getItem('sound'); if(soundSaved==='0') soundToggle.checked=false;
+
+        // Initial render - do not start a game until user clicks Start
+        createBoard(); updateBoardUI(); statusElement.textContent = `Click Start to begin`;
+
+        // Start game button
+        startBtn.onclick = async ()=>{
+            const size = parseInt(boardSizeEl.value,10) || 3;
+            initBoard(size);
+            // set currentPlayer to the human choice
+            currentPlayer = playerSymbolEl.value;
+            // If playing vs computer and human chose O, machine starts
+            if(modeEl.value==='computer' && playerSymbolEl.value==='O'){
+                // let the machine think first
+                await machineRespond();
+            }
+        };
+
+        // Expose resetGame for backward compatibility
+        function resetGame(){ resetBtn.click(); }
+
     </script>
 </body>
 </html>
