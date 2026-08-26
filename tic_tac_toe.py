@@ -25,6 +25,8 @@ DIFFICULTIES = {
     '1': 'Easy',
     '2': 'Intermediate',
     '3': 'Hard',
+    '4': 'Grandmaster',
+    '5': 'Super Undefeated',
 }
 
 
@@ -423,6 +425,97 @@ def get_strategic_move(board, machine_player, human_player, rng=None):
     return rng.choice(best_moves)
 
 
+def alphabeta(board, machine_player, human_player, depth, max_depth, alpha, beta, is_maximizing, transposition):
+    key = (board_key(board), is_maximizing, max_depth - depth)
+    if key in transposition:
+        return transposition[key]
+
+    if check_win(board, machine_player):
+        return 100000
+    if check_win(board, human_player):
+        return -100000
+    if check_draw(board):
+        return 0
+
+    if depth >= max_depth:
+        return evaluate_board(board, machine_player, human_player)
+
+    moves = get_available_moves(board)
+    # move ordering: prefer moves that score higher heuristically
+    scored_moves = []
+    for mv in moves:
+        r, c = mv
+        board[r][c] = machine_player if is_maximizing else human_player
+        s = evaluate_board(board, machine_player, human_player)
+        board[r][c] = EMPTY
+        scored_moves.append((s, mv))
+    scored_moves.sort(key=lambda x: x[0], reverse=is_maximizing)
+
+    if is_maximizing:
+        value = -sys.maxsize
+        for _, mv in scored_moves:
+            r, c = mv
+            board[r][c] = machine_player
+            score = alphabeta(board, machine_player, human_player, depth + 1, max_depth, alpha, beta, False, transposition)
+            board[r][c] = EMPTY
+            if score > value:
+                value = score
+            alpha = max(alpha, value)
+            if alpha >= beta:
+                break
+        transposition[key] = value
+        return value
+    else:
+        value = sys.maxsize
+        for _, mv in scored_moves:
+            r, c = mv
+            board[r][c] = human_player
+            score = alphabeta(board, machine_player, human_player, depth + 1, max_depth, alpha, beta, True, transposition)
+            board[r][c] = EMPTY
+            if score < value:
+                value = score
+            beta = min(beta, value)
+            if beta <= alpha:
+                break
+        transposition[key] = value
+        return value
+
+
+def get_alphabeta_move(board, machine_player, human_player, rng=None, time_limit=2.0, max_depth=6):
+    if rng is None:
+        rng = random
+    moves = get_available_moves(board)
+    if not moves:
+        return None
+
+    start = time.time()
+    best_move = None
+    best_score = -sys.maxsize
+    transposition = {}
+    # iterative deepening up to the chosen depth while respecting the time guard.
+    for depth in range(1, max_depth + 1):
+        local_best = None
+        local_best_score = -sys.maxsize
+        for mv in moves:
+            r, c = mv
+            board[r][c] = machine_player
+            score = alphabeta(board, machine_player, human_player, 1, depth, -sys.maxsize, sys.maxsize, False, transposition)
+            board[r][c] = EMPTY
+            if score > local_best_score:
+                local_best_score = score
+                local_best = mv
+        if local_best is not None:
+            best_move = local_best
+            best_score = local_best_score
+        # time cutoff
+        if time.time() - start > time_limit:
+            break
+
+    if best_move is None:
+        return rng.choice(moves)
+    return best_move
+
+
 def get_machine_move(board, machine_player, human_player, difficulty, rng=None):
     if rng is None:
         rng = random
@@ -430,11 +523,36 @@ def get_machine_move(board, machine_player, human_player, difficulty, rng=None):
     if not moves:
         return None
 
+    # Easy: random
     if difficulty == 'Easy':
         return rng.choice(moves)
+    # Intermediate: tactical + center/random
     if difficulty == 'Intermediate':
         return get_intermediate_move(board, machine_player, human_player, rng=rng)
-    if len(board) == 3:
+
+    size = len(board)
+    if difficulty == 'Super Undefeated':
+        # Perfect where feasible, deeper alpha-beta elsewhere. The UI gives this
+        # mode a strict per-turn clock, so the search still has a hard guard.
+        if size == 3:
+            return get_minimax_move(board, machine_player, human_player, rng=rng)
+        if size == 4:
+            return get_alphabeta_move(board, machine_player, human_player, rng=rng, time_limit=3.0, max_depth=8)
+        return get_alphabeta_move(board, machine_player, human_player, rng=rng, time_limit=2.0, max_depth=7)
+
+    # Grandmaster: perfect play where feasible
+    if difficulty == 'Grandmaster':
+        # 3x3 uses existing minimax perfect solver
+        if size == 3:
+            return get_minimax_move(board, machine_player, human_player, rng=rng)
+        # 4x4: use alpha-beta with transposition and a time limit
+        if size == 4:
+            return get_alphabeta_move(board, machine_player, human_player, rng=rng, time_limit=2.5, max_depth=6)
+        # larger boards: attempt deeper strategic search but with time guard
+        return get_alphabeta_move(board, machine_player, human_player, rng=rng, time_limit=1.2, max_depth=6)
+
+    # Hard or default: strategic heuristic search
+    if size == 3:
         return get_minimax_move(board, machine_player, human_player, rng=rng)
     return get_strategic_move(board, machine_player, human_player, rng=rng)
 
