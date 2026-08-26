@@ -18,3 +18,4 @@ Notes:
   - Deterministic AI option: toggle and provide a seed; the server will seed its RNG with the provided seed for reproducible machine moves.
   - GitHub Actions CI workflow at .github/workflows/ci.yml runs pytest on push/PR.
 - The /play endpoint accepts JSON: { board, difficulty, player_symbol, mode, seed } and returns JSON with machine_move and winning_line when available.
+# tic-tac-toe-game
