@@ -1351,6 +1351,15 @@
                 </div>
 
                 <div class="action-grid">
+                    <button id="hintBtn" class="ghost-btn" type="button">Explain a move</button>
+                    <button id="replayBtn" class="ghost-btn" type="button">Replay round</button>
+                    <button id="dailyBtn" class="ghost-btn wide" type="button">Daily puzzle</button>
+                    <label class="field wide">Match series
+                        <select id="seriesLength"><option value="1">Single round</option><option value="3">Best of 3</option><option value="5">Best of 5</option></select>
+                    </label>
+                    <button id="seriesBtn" class="ghost-btn wide" type="button">New series (local / AI)</button>
+                    <div id="seriesStatus" class="room-status wide" aria-live="polite">Single round</div>
+                    <div id="hintStatus" class="room-status wide" aria-live="polite"></div>
                     <button id="startBtn" class="primary-btn wide" type="button">Start Game</button>
                     <button id="pauseBtn" class="action-btn" type="button">Pause Game</button>
                     <button id="saveGameBtn" class="ghost-btn" type="button">Save Game</button>
@@ -1374,6 +1383,14 @@
         <button id="bigStartBtn" class="big-start" type="button">Click to Begin</button>
     </div>
 
+    <div id="featureModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="featureTitle">
+        <div class="modal-card">
+            <div class="modal-head"><h2 id="featureTitle">Practice</h2><button id="closeFeatureBtn" class="small" type="button">Close</button></div>
+            <p id="featureMessage" aria-live="polite"></p>
+            <div id="featureBoard" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0"></div>
+            <div class="action-grid"><button id="featurePrev" class="small" type="button">Previous</button><button id="featureNext" class="small" type="button">Next</button></div>
+        </div>
+    </div>
     <canvas id="confettiCanvas"></canvas>
     <div class="celebration" id="celebration"></div>
     <div class="ribbon" id="ribbon"></div>
@@ -1391,6 +1408,7 @@
                 Professional edition by Leon Mureti, 2026. This interface keeps classic tic tac toe fast while adding board scaling,
                 seeded AI, league progression, Super Undefeated clocks, persistent trophies, pause/resume, save slots, keyboard play, motion feedback, and a tournament-style HUD.
             </p>
+            <p>Keyboard: use Tab to reach the board, arrow keys to move between available cells, and Enter or Space to play. P pauses, U undoes, R resets, and Ctrl+S saves. Escape closes dialogs.</p>
         </div>
     </div>
 
@@ -1632,6 +1650,7 @@
             if (!isWifiMode()) return "No room";
             if (!hasRoomSession()) return "Create or join a room";
             if (!room) return `Room ${roomSession.code}: connecting`;
+            if (room.rematch_votes?.length) return `Rematch: ${room.rematch_votes.join(" & ")} ready. Both players must vote for a rematch to agree.`;
             if (room.status === "waiting") return `Room ${room.code}: waiting for Player O`;
             if (room.status === "win") return `${roomPlayerName(room.winner)} (${room.winner}) wins in room ${room.code}`;
             if (room.status === "draw") return `Room ${room.code}: draw`;
@@ -1641,7 +1660,7 @@
         }
 
         function roomFinishKey(room) {
-            return `${ROOM_SESSION_KEY}:${room.code}:finished:${room.version}`;
+            return `${ROOM_SESSION_KEY}:${room.code}:finished:${room.round ?? room.version}`;
         }
 
         function saveRoomSession() {
@@ -1665,6 +1684,10 @@
         function updateRoomUI() {
             const active = isWifiMode();
             const connected = hasRoomSession();
+            els.startBtn.textContent = active && connected ? "Vote for rematch" : "Start Game";
+            els.resetBtn.textContent = active && connected ? "Vote for rematch" : "Reset";
+            els.startBtn.disabled = active && connected && !["win", "draw"].includes(roomSession.room?.status);
+            els.resetBtn.disabled = active && connected && !["win", "draw"].includes(roomSession.room?.status);
             const code = connected ? roomSession.code : normalizeRoomCode(els.roomCodeInput.value || roomSession.code);
             els.networkPanel.classList.toggle("active", active);
             els.roomCodeInput.value = code;
@@ -1938,6 +1961,7 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         player_id: roomSession.playerId,
+                        round: roomSession.room?.round,
                         board_size: parseInt(els.boardSize.value, 10) || boardSize,
                         league: els.league.value
                     })
@@ -1945,7 +1969,7 @@
                 const data = await response.json();
                 if (data.room) applyRoomState(data.room);
                 if (!response.ok) throw new Error(data.message || "Room could not reset");
-                showRibbon("Room reset");
+                showRibbon(data.status === "pending" ? "Rematch requested. Waiting for your opponent." : "New round ready");
             } catch (error) {
                 setStatus(error.message || "Room could not reset");
                 showRibbon(error.message || "Room could not reset");
@@ -2223,6 +2247,7 @@
         }
 
         function loadGameFromSlot() {
+            if (busy) return;
             if (isWifiMode()) {
                 showRibbon("Saved games are local-only.");
                 return;
@@ -2236,6 +2261,8 @@
                 return;
             }
 
+            series = null;
+            updateSeriesUI();
             stopTimer();
             els.playOverlay.style.display = "none";
             applySavedControls(saved.settings || {});
@@ -2527,6 +2554,10 @@
                     cell.dataset.col = String(col);
                     cell.setAttribute("role", "gridcell");
                     cell.setAttribute("aria-label", `row ${row + 1} column ${col + 1}`);
+                    cell.addEventListener("focus", () => {
+                        focusedR = row;
+                        focusedC = col;
+                    });
                     cell.addEventListener("click", () => handleClick(row, col));
                     cell.addEventListener("keydown", (event) => {
                         if (event.key === "Enter" || event.key === " ") {
@@ -2540,12 +2571,14 @@
         }
 
         function updateBoardUI(lastMove = null, machineMove = null) {
+            feature("hintStatus").textContent = "";
             const wifiLocked = isWifiMode() && (!hasRoomSession() || currentPlayer !== roomSession.symbol);
             document.querySelectorAll(".cell").forEach((cell) => {
                 const row = Number(cell.dataset.row);
                 const col = Number(cell.dataset.col);
                 const value = boardState[row]?.[col] || " ";
                 cell.textContent = value === " " ? "" : value;
+                cell.style.outline = "";
                 cell.className = `cell ${value === " " ? "empty" : value}`;
                 cell.disabled = busy || !gameActive || gamePaused || value !== " " || wifiLocked;
                 cell.setAttribute("aria-label", `row ${row + 1} column ${col + 1}${value === " " ? " empty" : ` ${value}`}`);
@@ -2598,6 +2631,10 @@
         }
 
         function initBoard(size) {
+            if (busy) return;
+            if (series && (series.mode !== els.mode.value || series.size !== size || series.symbol !== els.playerSymbol.value)) series = null;
+            if (series?.complete) series = null;
+            if (series?.roundDone) { series.round += 1; series.roundDone = false; }
             boardSize = size;
             boardState = Array.from({ length: size }, () => Array.from({ length: size }, () => " "));
             moveHistory = [];
@@ -2607,15 +2644,16 @@
             busy = false;
             gameActive = true;
             gamePaused = false;
-            currentPlayer = "X";
+            currentPlayer = series && series.round % 2 === 0 ? "O" : "X";
+            updateSeriesUI();
             createBoard();
             clearHighlights();
             renderMoveFeed();
             resetTimer();
             updateRoles();
             updateMatchMeta();
-            if (els.mode.value === "computer" && els.playerSymbol.value === "O") {
-                setStatus(`${playerName("X")} opens the match`);
+            if (els.mode.value === "computer" && els.playerSymbol.value !== currentPlayer) {
+                setStatus(`${playerName(currentPlayer)} opens the match`);
                 updateBoardUI();
                 startTimer();
                 machineRespond();
@@ -2642,6 +2680,7 @@
         }
 
         function finishGame(type, winner = null, line = null) {
+            recordSeriesResult(winner);
             gameActive = false;
             gamePaused = false;
             busy = false;
@@ -2793,6 +2832,7 @@
         }
 
         function undoMove() {
+            if (busy || (series && !gameActive)) return;
             if (isWifiMode()) {
                 showRibbon("Undo is local-only.");
                 return;
@@ -3100,7 +3140,8 @@
             const unlockMessage = handleUnlocks(winner);
             els.celebration.innerHTML = "";
             const colors = ["var(--x)", "var(--o)", "var(--gold)", "var(--mint)", "var(--violet)"];
-            for (let i = 0; i < 28; i += 1) {
+            const burstCount = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 28;
+            for (let i = 0; i < burstCount; i += 1) {
                 const burst = document.createElement("div");
                 burst.className = "burst";
                 burst.style.left = `${Math.random() * 100}%`;
@@ -3119,6 +3160,7 @@
         }
 
         function explodeConfetti() {
+            if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
             const canvas = els.confettiCanvas;
             const ctx = canvas.getContext("2d");
             if (!ctx) return;
@@ -3211,12 +3253,218 @@
             storage.setItem("theme", next);
         }
 
+        let series = null;
+        const feature = (id) => document.getElementById(id);
+
+        function updateSeriesUI() {
+            feature("seriesStatus").textContent = series
+                ? `Best of ${series.length}: X ${series.X} – ${series.O} O · ${series.draws} draws · ${series.complete ? `${series.X > series.O ? "X" : "O"} wins the series!` : `Round ${series.round}${series.roundDone ? " complete. Press Start Game for the next round." : ""}`}`
+                : "Single round. Series are available for local and AI matches; draws are replayed.";
+        }
+
+        function recordSeriesResult(winner) {
+            if (!series || isWifiMode() || series.roundDone) return;
+            if (winner) series[winner] += 1;
+            else series.draws += 1;
+            series.roundDone = true;
+            series.complete = Math.max(series.X, series.O) > series.length / 2;
+            updateSeriesUI();
+        }
+
+        function availableMoves(board) {
+            return board.flatMap((row, r) => row.flatMap((value, c) => value === " " ? [[r, c]] : []));
+        }
+
+        function winningMoves(board, symbol) {
+            return availableMoves(board).filter(([r, c]) => {
+                board[r][c] = symbol;
+                const wins = Boolean(getWinningLine(board, symbol));
+                board[r][c] = " ";
+                return wins;
+            });
+        }
+
+        function bestPracticeMove(board, symbol) {
+            const memo = new Map();
+            function solve(turn) {
+                if (getWinningLine(board, other(turn))) return -1;
+                const moves = availableMoves(board);
+                if (!moves.length) return 0;
+                const key = board.flat().join("") + turn;
+                if (memo.has(key)) return memo.get(key);
+                let score = -2;
+                for (const [r, c] of moves) {
+                    board[r][c] = turn;
+                    score = Math.max(score, -solve(other(turn)));
+                    board[r][c] = " ";
+                    if (score === 1) break;
+                }
+                memo.set(key, score);
+                return score;
+            }
+            let best = null;
+            let value = -2;
+            for (const [r, c] of availableMoves(board)) {
+                board[r][c] = symbol;
+                const score = -solve(other(symbol));
+                board[r][c] = " ";
+                if (score > value) { value = score; best = [r, c]; }
+            }
+            return best;
+        }
+
+        feature("hintBtn").addEventListener("click", () => {
+            const output = feature("hintStatus");
+            if (isWifiMode() || !gameActive || busy || gamePaused) {
+                output.textContent = "Hints are available on your turn in local and AI matches.";
+                return;
+            }
+            const board = cloneBoard(boardState);
+            const win = winningMoves(board, currentPlayer)[0];
+            const block = winningMoves(board, other(currentPlayer))[0];
+            const move = win || (boardSize === 3 ? bestPracticeMove(board, currentPlayer) : block || availableMoves(board)[0]);
+            if (!move) return;
+            const [r, c] = move;
+            board[r][c] = currentPlayer;
+            const fork = winningMoves(board, currentPlayer).length > 1;
+            const reason = win ? "Complete a line to win now." : block && block[0] === r && block[1] === c ? "Block your opponent's immediate winning line." : fork ? "Create a fork: two winning threats for your next turn." : boardSize === 3 ? "This move gives the best possible outcome against perfect play." : "Try this open square. Larger-board hints check immediate wins and blocks, not every continuation.";
+            output.textContent = `Row ${r + 1}, column ${c + 1}: ${reason}`;
+            els.board.querySelectorAll(".cell").forEach((cell) => cell.style.outline = "");
+            els.board.querySelector(`[data-row="${r}"][data-col="${c}"]`).style.outline = "3px solid var(--gold)";
+        });
+
+        feature("seriesBtn").addEventListener("click", () => {
+            if (busy || isWifiMode()) { showRibbon("Start a series in local or AI mode when the AI is idle."); return; }
+            const length = Number(feature("seriesLength").value);
+            series = length === 1 ? null : { length, X: 0, O: 0, draws: 0, round: 1, roundDone: false, complete: false, mode: els.mode.value, size: Number(els.boardSize.value), symbol: els.playerSymbol.value };
+            els.playOverlay.style.display = "none";
+            initBoard(Number(els.boardSize.value));
+        });
+
+        function renderFeatureBoard(board, onMove = null) {
+            const container = feature("featureBoard");
+            container.innerHTML = "";
+            container.style.gridTemplateColumns = `repeat(${board.length}, 1fr)`;
+            board.forEach((row, r) => row.forEach((value, c) => {
+                const cell = document.createElement("button");
+                cell.className = "small";
+                cell.style.minHeight = "54px";
+                cell.textContent = value === " " ? "·" : value;
+                cell.setAttribute("aria-label", `Row ${r + 1} column ${c + 1}: ${value === " " ? "empty" : value}`);
+                cell.disabled = !onMove || value !== " ";
+                if (onMove) cell.addEventListener("click", () => onMove(r, c));
+                container.appendChild(cell);
+            }));
+        }
+
+        function openFeature(title) {
+            if (busy) { showRibbon("Wait for the AI to finish its move."); return false; }
+            if (gameActive && !gamePaused && !isWifiMode()) togglePauseGame();
+            feature("featureTitle").textContent = title;
+            feature("featureNext").textContent = "Next";
+            openModal(feature("featureModal"));
+            return true;
+        }
+
+        feature("replayBtn").addEventListener("click", () => {
+            if (!openFeature("Round replay")) return;
+            const moves = moveLog.map((entry) => entry.match(/([XO]) -> R(\d+) C(\d+)/)).filter(Boolean);
+            const initial = cloneBoard(boardState);
+            moves.forEach((move) => { initial[Number(move[2]) - 1][Number(move[3]) - 1] = " "; });
+            let index = 0;
+            const render = () => {
+                const board = cloneBoard(initial);
+                moves.slice(0, index).forEach((move) => { board[Number(move[2]) - 1][Number(move[3]) - 1] = move[1]; });
+                renderFeatureBoard(board);
+                feature("featureMessage").textContent = `Move ${index} of ${moves.length}${index ? ` · ${moves[index - 1][0]}` : " · Starting position"}. Close and press Resume Game to continue a paused match.`;
+                feature("featurePrev").disabled = index === 0;
+                feature("featureNext").disabled = index === moves.length;
+            };
+            feature("featurePrev").onclick = () => { index -= 1; render(); };
+            feature("featureNext").onclick = () => { index += 1; render(); };
+            render();
+        });
+
+        function dailyPuzzle(date) {
+            const candidates = [];
+            for (let mask = 0; mask < 19683; mask += 1) {
+                let value = mask;
+                const flat = Array.from({ length: 9 }, () => { const token = [" ", "X", "O"][value % 3]; value = Math.floor(value / 3); return token; });
+                if (flat.filter((x) => x === "X").length !== 2 || flat.filter((x) => x === "O").length !== 2) continue;
+                const board = [flat.slice(0, 3), flat.slice(3, 6), flat.slice(6)];
+                if (winningMoves(board, "X").length || winningMoves(board, "O").length) continue;
+                const solution = availableMoves(board).some(([r, c]) => {
+                    board[r][c] = "X";
+                    const forced = availableMoves(board).every(([a, b]) => {
+                        board[a][b] = "O";
+                        const wins = !getWinningLine(board, "O") && winningMoves(board, "X").length > 0;
+                        board[a][b] = " ";
+                        return wins;
+                    });
+                    board[r][c] = " ";
+                    return forced;
+                });
+                if (solution) candidates.push(board);
+            }
+            return cloneBoard(candidates[Math.floor(Date.parse(date) / 86400000) % candidates.length]);
+        }
+
+        feature("dailyBtn").addEventListener("click", () => {
+            if (!openFeature("Daily puzzle · win in two moves")) return;
+            const date = new Date().toISOString().slice(0, 10);
+            let board;
+            let turns;
+            const restart = () => {
+                board = dailyPuzzle(date);
+                turns = 0;
+                feature("featureMessage").textContent = `${date} UTC · You are X. Force a win within two moves against the best defense.${storage.getItem(`puzzle:${date}`) ? " Already solved today!" : ""}`;
+                renderFeatureBoard(board, play);
+            };
+            const play = (r, c) => {
+                board[r][c] = "X";
+                turns += 1;
+                if (getWinningLine(board, "X")) {
+                    storage.setItem(`puzzle:${date}`, "solved");
+                    feature("featureMessage").textContent = "Solved! You forced a win. Come back tomorrow for another puzzle.";
+                    renderFeatureBoard(board);
+                    return;
+                }
+                const reply = bestPracticeMove(board, "O");
+                if (reply) board[reply[0]][reply[1]] = "O";
+                const failed = turns >= 2 || getWinningLine(board, "O") || checkDraw(board);
+                feature("featureMessage").textContent = failed ? "That did not force a win in two moves. Try again!" : "O has defended. Find your winning move.";
+                renderFeatureBoard(board, failed ? null : play);
+            };
+            feature("featurePrev").disabled = true;
+            feature("featureNext").disabled = false;
+            feature("featureNext").textContent = "Try again";
+            feature("featureNext").onclick = restart;
+            restart();
+        });
+        feature("closeFeatureBtn").onclick = () => closeModal(feature("featureModal"));
+        feature("featureModal").addEventListener("click", (event) => {
+            if (event.target === feature("featureModal")) closeModal(feature("featureModal"));
+        });
+
+        let activeModal = null;
+        let modalTrigger = null;
+
         function openModal(modal) {
+            if (activeModal) closeModal(activeModal);
+            modalTrigger = document.activeElement;
+            activeModal = modal;
             modal.style.display = "flex";
+            document.querySelector(".app-shell").inert = true;
+            modal.querySelector("button").focus();
         }
 
         function closeModal(modal) {
             modal.style.display = "none";
+            if (activeModal !== modal) return;
+            activeModal = null;
+            document.querySelector(".app-shell").inert = false;
+            if (modalTrigger?.isConnected) modalTrigger.focus();
+            modalTrigger = null;
         }
 
         els.saveNamesBtn.addEventListener("click", savePlayerNames);
@@ -3277,6 +3525,8 @@
             if (event.target === els.unlocksModal) closeModal(els.unlocksModal);
         });
         els.mode.addEventListener("change", () => {
+            series = null;
+            updateSeriesUI();
             if (isWifiMode()) {
                 stopTimer();
                 clearRoomSession({ keepInputs: true });
@@ -3335,8 +3585,27 @@
             storage.setItem("sound", els.soundToggle.checked ? "1" : "0");
         });
         document.addEventListener("keydown", (event) => {
+            if (activeModal) {
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeModal(activeModal);
+                } else if (event.key === "Tab") {
+                    const controls = Array.from(activeModal.querySelectorAll('button, a[href], input, select, textarea, [tabindex="0"]')).filter((control) => !control.disabled && control.getClientRects().length);
+                    const first = controls[0];
+                    const last = controls[controls.length - 1];
+                    if (event.shiftKey && document.activeElement === first) {
+                        event.preventDefault();
+                        last?.focus();
+                    } else if (!event.shiftKey && document.activeElement === last) {
+                        event.preventDefault();
+                        first?.focus();
+                    }
+                }
+                return;
+            }
             const target = event.target;
             const isFormField = target && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName);
+            if (isFormField || event.altKey || event.metaKey) return;
             if (event.key === "Escape") {
                 els.playOverlay.style.display = "none";
                 closeModal(els.aboutModal);
@@ -3350,14 +3619,21 @@
                 event.preventDefault();
                 togglePauseGame();
             }
-            if (!isFormField && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+            if (target?.classList.contains("cell") && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
                 event.preventDefault();
-                if (event.key === "ArrowUp") focusedR = (focusedR + boardSize - 1) % boardSize;
-                if (event.key === "ArrowDown") focusedR = (focusedR + 1) % boardSize;
-                if (event.key === "ArrowLeft") focusedC = (focusedC + boardSize - 1) % boardSize;
-                if (event.key === "ArrowRight") focusedC = (focusedC + 1) % boardSize;
-                const cell = document.querySelector(`.cell[data-row="${focusedR}"][data-col="${focusedC}"]`);
-                if (cell) cell.focus();
+                let row = focusedR;
+                let col = focusedC;
+                for (let step = 0; step < boardSize; step += 1) {
+                    if (event.key === "ArrowUp") row = (row + boardSize - 1) % boardSize;
+                    if (event.key === "ArrowDown") row = (row + 1) % boardSize;
+                    if (event.key === "ArrowLeft") col = (col + boardSize - 1) % boardSize;
+                    if (event.key === "ArrowRight") col = (col + 1) % boardSize;
+                    const cell = els.board.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+                    if (cell && !cell.disabled) {
+                        cell.focus();
+                        break;
+                    }
+                }
             }
             if (!isFormField && (event.key.toLowerCase() === "u" || (event.ctrlKey && event.key.toLowerCase() === "z"))) {
                 event.preventDefault();

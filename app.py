@@ -107,6 +107,9 @@ def get_lan_ip():
 
 
 def build_room_url(code):
+    public_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+    if public_domain:
+        return f'https://{public_domain}/?room={code}'
     host = request.host
     host_name, _, port = host.partition(':')
     if host_name in {'127.0.0.1', 'localhost', '0.0.0.0'}:
@@ -136,6 +139,8 @@ def public_room(room):
         'moves': room['moves'],
         'last_move': room.get('last_move'),
         'version': room['version'],
+        'round': room.get('round', 1),
+        'rematch_votes': room.get('rematch_votes', []),
     }
 
 
@@ -220,6 +225,11 @@ def reset_challenge_count(league):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'ok'}), 200
 
 
 @app.route('/api/rooms', methods=['POST'])
@@ -382,10 +392,27 @@ def api_room_reset(room_code):
         room = rooms.get(code)
         if not room:
             return jsonify({'status': 'error', 'message': 'Room not found'}), 404
-        if not find_room_player(room, data.get('player_id')):
+        symbol = find_room_player(room, data.get('player_id'))
+        if not symbol:
             return jsonify({'status': 'error', 'message': 'Player is not in this room'}), 403
 
+        if room['players'].get('O'):
+            if room['status'] not in ('win', 'draw'):
+                return jsonify({'status': 'error', 'message': 'Finish this round before requesting a rematch', 'room': public_room(room)}), 409
+            if data.get('round') != room.get('round', 1):
+                return jsonify({'status': 'error', 'message': 'Round changed', 'room': public_room(room)}), 409
+            votes = room.setdefault('rematch_votes', [])
+            if symbol not in votes:
+                votes.append(symbol)
+            room['updated_at'] = time.time()
+            if len(votes) < 2:
+                return jsonify({'status': 'pending', 'room': public_room(room)})
+
         board_size = normalize_board_size(data.get('board_size', room['board_size']))
+        if room['players'].get('O'):
+            board_size = room['board_size']
+        room['rematch_votes'] = []
+        room['round'] = room.get('round', 1) + 1
         room['board_size'] = board_size
         room['board'] = empty_board(board_size)
         room['current_player'] = 'X'
@@ -556,4 +583,4 @@ def admin_view():
     return '\n'.join(html)
 
 if __name__ == '__main__':
-    app.run(host=os.environ.get('FLASK_RUN_HOST', '0.0.0.0'), port=int(os.environ.get('PORT', 5000)), debug=True)
+    app.run(host=os.environ.get('FLASK_RUN_HOST', '0.0.0.0'), port=int(os.environ.get('PORT', 5000)), debug=os.environ.get('FLASK_DEBUG') == '1')

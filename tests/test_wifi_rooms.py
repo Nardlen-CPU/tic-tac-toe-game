@@ -84,3 +84,29 @@ def test_wifi_room_reset_syncs_board(client):
     assert room['board_size'] == 5
     assert len(room['board']) == 5
     assert room['status'] == 'waiting'
+
+
+def test_rematch_requires_two_votes_and_rejects_stale_round(client):
+    created = client.post('/api/rooms', json={}).get_json()
+    code = created['room']['code']
+    x = created['player']['id']
+    o = client.post(f'/api/rooms/{code}/join', json={}).get_json()['player']['id']
+    url = f'/api/rooms/{code}/reset'
+    assert client.post(url, json={'player_id': x, 'round': 1}).status_code == 409
+    assert client.post(url, json={'player_id': 'stranger', 'round': 1}).status_code == 403
+    for player, row, col in [(x, 0, 0), (o, 1, 0), (x, 0, 1), (o, 1, 1), (x, 0, 2)]:
+        result = client.post(f'/api/rooms/{code}/move', json={'player_id': player, 'row': row, 'col': col})
+        assert result.status_code == 200
+    finished = result.get_json()['room']
+    for _ in range(2):
+        vote = client.post(url, json={'player_id': x, 'round': 1}).get_json()
+        assert vote['status'] == 'pending'
+        assert vote['room']['rematch_votes'] == ['X']
+        assert vote['room']['board'] == finished['board']
+        assert vote['room']['version'] == finished['version']
+    restarted = client.post(url, json={'player_id': o, 'round': 1, 'board_size': 5}).get_json()['room']
+    assert restarted['status'] == 'active'
+    assert restarted['round'] == 2
+    assert restarted['board'] == [[' '] * 3 for _ in range(3)]
+    assert restarted['rematch_votes'] == []
+    assert client.post(url, json={'player_id': x, 'round': 1}).status_code == 409
