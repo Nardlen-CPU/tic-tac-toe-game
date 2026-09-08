@@ -93,6 +93,7 @@ def test_rematch_requires_two_votes_and_rejects_stale_round(client):
     o = client.post(f'/api/rooms/{code}/join', json={}).get_json()['player']['id']
     url = f'/api/rooms/{code}/reset'
     assert client.post(url, json={'player_id': x, 'round': 1}).status_code == 409
+
     assert client.post(url, json={'player_id': 'stranger', 'round': 1}).status_code == 403
     for player, row, col in [(x, 0, 0), (o, 1, 0), (x, 0, 1), (o, 1, 1), (x, 0, 2)]:
         result = client.post(f'/api/rooms/{code}/move', json={'player_id': player, 'row': row, 'col': col})
@@ -110,3 +111,41 @@ def test_rematch_requires_two_votes_and_rejects_stale_round(client):
     assert restarted['board'] == [[' '] * 3 for _ in range(3)]
     assert restarted['rematch_votes'] == []
     assert client.post(url, json={'player_id': x, 'round': 1}).status_code == 409
+
+
+def test_guest_selects_league_and_next_round_requires_fresh_votes(client, monkeypatch):
+    awards = []
+    monkeypatch.setattr('app.increment_trophy', lambda league, winner: awards.append((league, winner)))
+    created = client.post('/api/rooms', json={'league': 'Bronze'}).get_json()
+    code = created['room']['code']
+    x = created['player']['id']
+    joined = client.post(f'/api/rooms/{code}/join', json={}).get_json()
+    o = joined['player']['id']
+    url = f'/api/rooms/{code}/league'
+    version = joined['room']['version']
+    assert client.post(url, json={'player_id': 'outsider', 'league': 'Gold', 'version': version}).status_code == 403
+    assert client.post(url, json={'player_id': o, 'league': 'Unknown', 'version': version}).status_code == 400
+    assert client.post(url, json={'player_id': o, 'league': 'Gold', 'version': version - 1}).status_code == 409
+    chosen = client.post(url, json={'player_id': o, 'league': 'Gold', 'version': version})
+    assert chosen.status_code == 200
+    assert chosen.get_json()['room']['league'] == 'Gold'
+    for player, row, col in [(x, 0, 0), (o, 1, 0), (x, 0, 1), (o, 1, 1), (x, 0, 2)]:
+        room = client.post(f'/api/rooms/{code}/move', json={'player_id': player, 'row': row, 'col': col}).get_json()['room']
+        if len(room['moves']) == 1:
+            assert client.post(url, json={'player_id': o, 'league': 'Silver', 'version': room['version']}).status_code == 409
+    assert awards == [('Gold', 'X')]
+    reset = f'/api/rooms/{code}/reset'
+    old_version = room['version']
+    client.post(reset, json={'player_id': x, 'round': 1, 'version': old_version})
+    queued = client.post(url, json={'player_id': o, 'league': 'Silver', 'version': old_version}).get_json()['room']
+    assert queued['league'] == 'Gold'
+    assert queued['next_league'] == 'Silver'
+    assert queued['rematch_votes'] == []
+    assert client.post(reset, json={'player_id': x, 'round': 1, 'version': old_version}).status_code == 409
+    first = client.post(reset, json={'player_id': o, 'round': 1, 'version': queued['version']}).get_json()
+    assert first['status'] == 'pending'
+    final = client.post(reset, json={'player_id': x, 'round': 1, 'version': queued['version'], 'league': 'Hard'}).get_json()['room']
+    assert final['league'] == 'Silver'
+    assert final['next_league'] is None
+    assert final['status'] == 'active'
+    assert awards == [('Gold', 'X')]

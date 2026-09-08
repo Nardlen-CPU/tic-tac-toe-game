@@ -1348,6 +1348,13 @@
                         <button id="leaveRoomBtn" class="ghost-btn" type="button">Leave Room</button>
                     </div>
                     <div id="roomStatus" class="room-status">No room</div>
+                    <label class="field"><span class="field-label">Room league</span>
+                        <select id="roomLeague">
+                            <option>Bronze</option><option>Silver</option><option>Gold</option><option>Platinum</option><option>Grandmaster</option><option>Super Undefeated</option>
+                        </select>
+                    </label>
+                    <button id="roomLeagueBtn" class="primary-btn" type="button">Play league</button>
+                    <div id="roomLeagueStatus" class="room-status">Join a room to play a league together.</div>
                 </div>
 
                 <div class="action-grid">
@@ -1361,6 +1368,7 @@
                     <div id="seriesStatus" class="room-status wide" aria-live="polite">Single round</div>
                     <div id="hintStatus" class="room-status wide" aria-live="polite"></div>
                     <button id="startBtn" class="primary-btn wide" type="button">Start Game</button>
+                    <button id="rematchBtn" class="primary-btn wide" type="button">Rematch</button>
                     <button id="pauseBtn" class="action-btn" type="button">Pause Game</button>
                     <button id="saveGameBtn" class="ghost-btn" type="button">Save Game</button>
                     <button id="loadGameBtn" class="ghost-btn" type="button">Load Game</button>
@@ -1684,6 +1692,16 @@
         function updateRoomUI() {
             const active = isWifiMode();
             const connected = hasRoomSession();
+            const room = roomSession.room;
+            const canChooseLeague = active && connected && !busy && (room?.status !== "active" || !room?.moves?.length);
+            feature("roomLeague").disabled = !canChooseLeague;
+            feature("roomLeagueBtn").disabled = !canChooseLeague;
+            feature("roomLeagueStatus").textContent = connected
+                ? `Current league: ${room?.league || "General"}.${room?.next_league ? ` Next rematch: ${room.next_league}. Both players must vote again.` : " Choose before the first move or after the round."} Winners earn trophies in the room league; Wi-Fi play has no AI or league clock.`
+                : "Join a room to play a league together.";
+            updateRematchUI();
+            els.startBtn.style.display = active && connected ? "none" : "";
+            els.resetBtn.style.display = active && connected ? "none" : "";
             els.startBtn.textContent = active && connected ? "Vote for rematch" : "Start Game";
             els.resetBtn.textContent = active && connected ? "Vote for rematch" : "Reset";
             els.startBtn.disabled = active && connected && !["win", "draw"].includes(roomSession.room?.status);
@@ -1757,7 +1775,12 @@
 
         function applyRoomState(room) {
             if (!room) return;
+            const previousLeague = roomSession.room?.next_league || roomSession.room?.league;
+            if (previousLeague !== (room.next_league || room.league)) {
+                setSelectValue(feature("roomLeague"), room.next_league || room.league || "Bronze");
+            }
             roomSession.room = room;
+            updateMatchMeta();
             roomSession.code = room.code || roomSession.code;
             roomSession.version = Number(room.version ?? roomSession.version);
             els.roomCodeInput.value = roomSession.code;
@@ -1962,6 +1985,7 @@
                     body: JSON.stringify({
                         player_id: roomSession.playerId,
                         round: roomSession.room?.round,
+                        version: roomSession.version,
                         board_size: parseInt(els.boardSize.value, 10) || boardSize,
                         league: els.league.value
                     })
@@ -2505,7 +2529,7 @@
                 : isWifiMode()
                     ? (hasRoomSession() ? `Wi-Fi Room ${roomSession.code}` : "Same Wi-Fi Room")
                     : "Two-Player Local";
-            els.matchMeta.textContent = `${mode} - ${els.boardSize.value}x${els.boardSize.value} - ${els.league.value}`;
+            els.matchMeta.textContent = `${mode} - ${els.boardSize.value}x${els.boardSize.value} - ${isWifiMode() ? roomSession.room?.league || "General" : els.league.value}`;
             els.roundLabel.textContent = `Round ${roundNumber}`;
             updateChallengeProgressUI();
         }
@@ -2572,6 +2596,7 @@
         }
 
         function updateBoardUI(lastMove = null, machineMove = null) {
+            updateRematchUI();
             feature("hintStatus").textContent = "";
             const wifiLocked = isWifiMode() && (!hasRoomSession() || currentPlayer !== roomSession.symbol);
             document.querySelectorAll(".cell").forEach((cell) => {
@@ -3245,6 +3270,37 @@
             document.documentElement.setAttribute("data-theme", next);
             storage.setItem("theme", next);
         }
+
+        function updateRematchUI() {
+            const wifi = isWifiMode();
+            const button = document.getElementById("rematchBtn");
+            button.style.display = wifi || els.mode.value === "local" ? "" : "none";
+            const voted = roomSession.room?.rematch_votes?.includes(roomSession.symbol);
+            button.textContent = wifi && voted ? "Rematch requested — waiting" : "Rematch";
+            button.disabled = busy || (wifi ? !hasRoomSession() || !["win", "draw"].includes(roomSession.room?.status) || voted : gameActive || !moveLog.length);
+            button.title = "After the round, play again with the same players. Wi-Fi requires both players to agree.";
+        }
+
+        document.getElementById("rematchBtn").addEventListener("click", () => {
+            if (isWifiMode()) resetWifiRoom();
+            else els.startBtn.click();
+        });
+        document.getElementById("roomLeagueBtn").addEventListener("click", async () => {
+            if (!isWifiMode() || !hasRoomSession() || busy) return;
+            busy = true;
+            updateRoomUI();
+            try {
+                const response = await fetch(roomEndpoint("/league"), {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ player_id: roomSession.playerId, version: roomSession.version, league: feature("roomLeague").value })
+                });
+                const data = await response.json();
+                if (data.room) applyRoomState(data.room);
+                if (!response.ok) throw new Error(data.message || "Could not select league");
+                showRibbon(data.room.next_league ? "League selected for the next rematch. Both players must agree." : "Room league ready. Make your first move!");
+            } catch (error) { showRibbon(error.message); }
+            finally { busy = false; updateBoardUI(); updateRoomUI(); }
+        });
 
         let series = null;
         const feature = (id) => document.getElementById(id);

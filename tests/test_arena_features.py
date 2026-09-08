@@ -187,11 +187,51 @@ def test_wifi_rematch_button_sends_round_and_keeps_score_once(page):
             applyRoomState(data.room);
         }''', {'room': room, 'id': x})
         score = page.evaluate('scoreX')
-        page.click('#startBtn')
+        page.click('#rematchBtn')
         page.wait_for_function('roomSession.room.rematch_votes.length === 1')
+        assert page.locator('#rematchBtn').is_disabled()
         assert page.evaluate('boardState[0]') == ['X', 'X', 'X']
         assert page.evaluate('scoreX') == score
         restarted = client.post(f'/api/rooms/{code}/reset', json={'player_id': o, 'round': 1}).get_json()['room']
         page.evaluate('(room) => applyRoomState(room)', restarted)
         assert page.evaluate('boardState') == [[' '] * 3 for _ in range(3)]
-        assert page.locator('#startBtn').is_disabled()
+        assert page.locator('#rematchBtn').is_disabled()
+
+
+def test_local_rematch_preserves_score_and_players(page):
+    page.click('#startBtn')
+    assert page.locator('#rematchBtn').is_disabled()
+    play(page, [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2)])
+    score = page.evaluate('scoreX')
+    page.click('#rematchBtn')
+    assert page.evaluate('boardState') == [[' '] * 3 for _ in range(3)]
+    assert page.evaluate('gameActive')
+    assert page.evaluate('scoreX') == score
+    assert page.locator('#mode').input_value() == 'local'
+
+
+def test_invited_player_can_select_shared_league(page):
+    from urllib.parse import urlsplit
+    from app import app
+
+    client = app.test_client()
+    created = client.post('/api/rooms', json={'league': 'Bronze'}).get_json()
+    code = created['room']['code']
+
+    def respond(route):
+        response = app.test_client().open(urlsplit(route.request.url).path,
+                                         method=route.request.method,
+                                         json=route.request.post_data_json)
+        route.fulfill(status=response.status_code, content_type='application/json', body=response.get_data(as_text=True))
+
+    page.route('http://game.test/api/rooms/**', respond)
+    page.goto(f'http://game.test/?room={code}')
+    page.keyboard.press('Escape')
+    page.click('#joinRoomBtn')
+    page.wait_for_function('roomSession.symbol === "O" && roomSession.room?.status === "active"')
+    page.select_option('#roomLeague', 'Gold')
+    page.click('#roomLeagueBtn')
+    page.wait_for_function('roomSession.room.league === "Gold"')
+    assert 'Gold' in page.locator('#roomLeagueStatus').inner_text()
+    assert client.get(f'/api/rooms/{code}').get_json()['room']['league'] == 'Gold'
+    assert page.locator('#rematchBtn').is_disabled()

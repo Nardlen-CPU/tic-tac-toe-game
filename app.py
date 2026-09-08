@@ -141,6 +141,8 @@ def public_room(room):
         'version': room['version'],
         'round': room.get('round', 1),
         'rematch_votes': room.get('rematch_votes', []),
+        'league': room.get('league', 'General'),
+        'next_league': room.get('next_league'),
     }
 
 
@@ -384,6 +386,32 @@ def api_room_move(room_code):
     return jsonify({'status': 'ok', 'room': payload})
 
 
+@app.route('/api/rooms/<room_code>/league', methods=['POST'])
+def api_room_league(room_code):
+    data = request.get_json(silent=True) or {}
+    with rooms_lock:
+        room = rooms.get(normalize_room_code(room_code))
+        if not room:
+            return jsonify({'message': 'Room not found'}), 404
+        if not find_room_player(room, data.get('player_id')):
+            return jsonify({'message': 'Player is not in this room'}), 403
+        league = data.get('league')
+        if league not in LEAGUE_ORDER:
+            return jsonify({'message': 'Choose a valid league'}), 400
+        if data.get('version') != room['version']:
+            return jsonify({'message': 'Room changed. Try again.', 'room': public_room(room)}), 409
+        if room['status'] == 'active' and room['moves']:
+            return jsonify({'message': 'Finish this round before changing league', 'room': public_room(room)}), 409
+        if room['status'] in ('win', 'draw'):
+            room['next_league'] = league
+            room['rematch_votes'] = []
+        else:
+            room['league'] = league
+        room['version'] += 1
+        room['updated_at'] = time.time()
+        return jsonify({'status': 'ok', 'room': public_room(room)})
+
+
 @app.route('/api/rooms/<room_code>/reset', methods=['POST'])
 def api_room_reset(room_code):
     code = normalize_room_code(room_code)
@@ -397,6 +425,8 @@ def api_room_reset(room_code):
             return jsonify({'status': 'error', 'message': 'Player is not in this room'}), 403
 
         if room['players'].get('O'):
+            if data.get('version') is not None and data['version'] != room['version']:
+                return jsonify({'message': 'Room settings changed. Review the league and vote again.', 'room': public_room(room)}), 409
             if room['status'] not in ('win', 'draw'):
                 return jsonify({'status': 'error', 'message': 'Finish this round before requesting a rematch', 'room': public_room(room)}), 409
             if data.get('round') != room.get('round', 1):
@@ -421,7 +451,7 @@ def api_room_reset(room_code):
         room['winning_line'] = None
         room['moves'] = []
         room['last_move'] = None
-        room['league'] = clean_player_name(data.get('league'), room.get('league') or 'General')
+        room['league'] = room.pop('next_league', None) or room.get('league') or 'General'
         room['trophy_awarded'] = False
         room['version'] += 1
         room['updated_at'] = time.time()
