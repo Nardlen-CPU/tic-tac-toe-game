@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,44 @@ def page():
 def play(page, moves):
     for row, col in moves:
         page.locator(f'.cell[data-row="{row}"][data-col="{col}"]').click()
+
+
+@pytest.mark.parametrize('level', ['Easy', 'Intermediate', 'Hard', 'Grandmaster', 'Super Undefeated'])
+def test_selected_difficulty_reaches_ai_and_survives_reload(page, level):
+    requests = []
+
+    def respond(route):
+        payload = route.request.post_data_json
+        requests.append(payload)
+        board = payload['board']
+        board[1][1] = 'O'
+        route.fulfill(content_type='application/json', body=json.dumps({
+            'status': 'continue', 'board': board, 'machine_move': [1, 1],
+        }))
+
+    page.route('http://game.test/play', respond)
+    page.select_option('#mode', 'computer')
+    page.select_option('#playerSymbol', 'X')
+    page.select_option('#difficulty', level)
+    page.click('#startBtn')
+    assert page.locator('#difficulty').input_value() == level
+    play(page, [(0, 0)])
+    page.wait_for_function('!busy && boardState[1][1] === "O"')
+    assert requests[0]['difficulty'] == level
+    page.reload()
+    assert page.locator('#difficulty').input_value() == level
+
+
+def test_ladder_controls_difficulty_only_while_enabled(page):
+    page.select_option('#difficulty', 'Grandmaster')
+    page.click('#challengeBtn')
+    assert page.locator('#difficulty').is_disabled()
+    assert page.locator('#difficulty').input_value() == 'Easy'
+    page.click('#challengeBtn')
+    assert page.locator('#difficulty').is_enabled()
+    assert page.locator('#difficulty').input_value() == 'Grandmaster'
+    page.click('#startBtn')
+    assert page.locator('#difficulty').input_value() == 'Grandmaster'
 
 
 def test_series_alternates_starters_and_finishes(page):

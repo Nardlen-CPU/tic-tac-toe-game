@@ -1699,7 +1699,7 @@
             els.copyRoomLinkBtn.disabled = !active || !code;
             els.leaveRoomBtn.disabled = !active || !connected;
             els.playerSymbol.disabled = active;
-            els.difficulty.disabled = active;
+            els.difficulty.disabled = active || challengeActive;
             els.timePerMove.disabled = active;
             els.deterministicToggle.disabled = active;
             els.seedInput.disabled = active;
@@ -2033,7 +2033,7 @@
         }
 
         function isSuperUndefeated() {
-            return els.difficulty.value === "Super Undefeated" || els.league.value === "Super Undefeated";
+            return els.difficulty.value === "Super Undefeated";
         }
 
         function getNextLeague(league) {
@@ -2052,6 +2052,7 @@
         }
 
         function applyLeagueRules() {
+            if (!challengeActive) return;
             const rule = leagueRules[els.league.value];
             if (!rule) return;
             els.difficulty.value = rule.difficulty;
@@ -3019,15 +3020,6 @@
                 els.league.value = firstUnlockedLeague();
                 applyLeagueRules();
             }
-            Array.from(els.difficulty.options).forEach((option) => {
-                const unlocked = leagueOrder.some((league) => unlocks[league] !== false && leagueRules[league].difficulty === option.value);
-                option.disabled = !unlocked;
-                option.textContent = unlocked ? option.value : `${option.value} (Locked)`;
-            });
-            const selectedDifficulty = els.difficulty.selectedOptions[0];
-            if (selectedDifficulty?.disabled) {
-                applyLeagueRules();
-            }
         }
 
         async function syncUnlocks() {
@@ -3237,6 +3229,7 @@
         }
 
         function applySavedSettings() {
+            setSelectValue(els.difficulty, storage.getItem("difficulty") || "Intermediate");
             const savedTheme = storage.getItem("theme");
             if (savedTheme) document.documentElement.setAttribute("data-theme", savedTheme);
             els.soundToggle.checked = storage.getItem("sound") !== "0";
@@ -3507,8 +3500,13 @@
         els.toggleTheme.addEventListener("click", toggleTheme);
         els.challengeBtn.addEventListener("click", () => {
             challengeActive = !challengeActive;
+            if (challengeActive) applyLeagueRules();
+            else setSelectValue(els.difficulty, storage.getItem("difficulty") || "Intermediate");
             els.challengeBtn.classList.toggle("primary", challengeActive);
             els.challengeBtn.textContent = challengeActive ? "Ladder: ON" : "Ladder Mode";
+            updateRoomUI();
+            updateMatchMeta();
+            if (gameActive && !gamePaused && !busy) startTimer();
             updateChallengeProgressUI();
         });
         els.unlocksBtn.addEventListener("click", async () => {
@@ -3572,6 +3570,7 @@
             if (gameActive && !gamePaused) startTimer();
         });
         els.difficulty.addEventListener("change", () => {
+            storage.setItem("difficulty", els.difficulty.value);
             if (els.difficulty.value === "Super Undefeated") {
                 els.timePerMove.value = String(SUPER_UNDEFEATED_SECONDS);
             }

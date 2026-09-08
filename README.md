@@ -21,6 +21,7 @@ Notes:
 # tic-tac-toe-game
 
 Arena features:
+- **Difficulty selection:** choose Easy, Intermediate, Hard, Grandmaster, or Super Undefeated freely in normal AI play. The choice survives Start Game and page reloads. Ladder Mode applies league difficulty while enabled; turning it off restores your chosen level.
 - **Explain a move:** local and AI hints identify wins, blocks, and forks. On 3x3 boards, hints search for the best outcome against perfect play; larger boards use immediate tactics.
 - **Match series:** choose Best of 3 or Best of 5, then press New series. First to 2 or 3 wins takes the series; draws award no points. Press Start Game after each round. X and O alternate starting. Series work in local and AI modes and last for the current page session. Loading a save or changing game mode, size, or human symbol ends the series.
 - **Round replay:** use Previous and Next to review the current round without changing its board. Active local/AI games pause; close the replay and press Resume Game to continue. Wi-Fi games continue live.
