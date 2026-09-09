@@ -1,4 +1,8 @@
+import pytest
 from playwright.sync_api import sync_playwright
+
+
+pytestmark = pytest.mark.e2e
 
 
 def test_ui_loads_and_start():

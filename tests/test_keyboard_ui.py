@@ -1,6 +1,10 @@
 from pathlib import Path
 
+import pytest
 from playwright.sync_api import sync_playwright
+
+
+pytestmark = pytest.mark.e2e
 
 
 def test_keyboard_navigation_dialogs_and_reduced_motion():

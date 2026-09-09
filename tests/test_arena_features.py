@@ -5,6 +5,9 @@ import pytest
 from playwright.sync_api import sync_playwright
 
 
+pytestmark = pytest.mark.e2e
+
+
 @pytest.fixture
 def page():
     html = (Path(__file__).resolve().parents[1] / 'templates' / 'index.html').read_text(encoding='utf-8')
